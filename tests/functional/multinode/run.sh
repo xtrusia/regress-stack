@@ -268,7 +268,10 @@ setup() {
 }
 
 ready() {
-    local node attempt=0 status remaining deadline=$((SECONDS + 900)) pending=("${nodes[@]}") next=()
+    local node attempt=0 status remaining deadline=$((SECONDS + 900)) pending=() next=()
+    # Readiness refuses compute-only nodes; the controllers' checks cover them.
+    mapfile -t pending < <(jq -r '.controllers[].name' "$artifacts/inventory.json")
+    ((${#pending[@]})) || { log "The inventory lists no controllers"; return 1; }
     while ((SECONDS < deadline)); do
         attempt=$((attempt + 1))
         next=()
