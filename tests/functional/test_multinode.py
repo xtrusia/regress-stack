@@ -408,6 +408,14 @@ def test_ready_fails_before_guest_checks_without_controllers(shell_cli):
     assert not calls.exists() or guest_readiness_nodes(calls) == []
 
 
+def test_ready_reports_an_unreadable_inventory(shell_cli):
+    run, work, artifacts, calls = shell_cli
+    result = run("ready")
+    assert result.returncode == 1
+    assert "Cannot read the controllers" in result.stdout
+    assert not calls.exists() or guest_readiness_nodes(calls) == []
+
+
 def test_preflight_failure_creates_no_lxd_resources(shell_cli):
     run, work, artifacts, calls = shell_cli
     shutil.rmtree(work)
