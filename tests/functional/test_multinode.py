@@ -86,7 +86,18 @@ args = sys.argv[1:]
 with open(os.environ["CALLS"], "a") as output:
     output.write(json.dumps([name, *args]) + "\n")
 if name == "iptables":
-    sys.exit(0)
+    # Host rules exist until deleted, so cleanup without provision still has
+    # rules to remove and its delete-until-absent loop terminates.
+    action, rule = args[0], json.dumps(args[1:])
+    state = Path(os.environ["CALLS"]).with_name("iptables-deleted.json")
+    deleted = set(json.loads(state.read_text())) if state.exists() else set()
+    present = rule not in deleted
+    if action == "-I":
+        deleted.discard(rule)
+    elif action == "-D" and present:
+        deleted.add(rule)
+    state.write_text(json.dumps(sorted(deleted)))
+    sys.exit(0 if action == "-I" or present else 1)
 if name == "terraform":
     directory = Path(args[0].removeprefix("-chdir="))
     if "init" in args:
@@ -102,7 +113,12 @@ if name == "terraform":
             values = json.loads((directory / "terraform.tfvars.json").read_text())
             print(values["run_id"] + "-ci")
         else:
-            print(json.dumps({"schema": 1, "profile": "hyperconverged"}))
+            controllers = [{"name": f"node{index}"} for index in (1, 2, 3)]
+            print(
+                json.dumps(
+                    {"schema": 1, "profile": "hyperconverged", "controllers": controllers}
+                )
+            )
     sys.exit(0)
 if "cat" in args:
     if os.environ.get("MISSING_CREDENTIALS"):
@@ -280,7 +296,9 @@ def test_cleanup_uses_only_own_state_and_bridge_rules(shell_cli, failure):
     assert destroys[0][1] == f"-chdir={work}/terraform"
     assert not any("delete" in command for command in commands)
     deleted_rules = [command for command in commands if "-D" in command]
-    assert len(deleted_rules) == 4
+    # Two FORWARD rules per bridge and the DNS INPUT rules, each deleted once.
+    assert len(deleted_rules) == 6
+    assert len({json.dumps(command) for command in deleted_rules}) == 6
     assert all(
         any(bridge in command for bridge in ("rs12345678-m", "rs12345678-p"))
         for command in deleted_rules
